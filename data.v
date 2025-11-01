@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-module washing_machine_gate(
+module washing_machine_dataflow(
     input  wire clk,
     input  wire rst_n,
     input  wire start,
@@ -26,35 +26,32 @@ module washing_machine_gate(
 
     reg [2:0] next_state;
 
-    // Control signals using gates
-    wire start_ok, mode_ok, safe, done, cancel_n;
-    not (cancel_n, cancel);
-    and (start_ok, start, cancel_n, ~lid);
-    or  (mode_ok, mode1, mode2, mode3);
-    and (safe, cancel_n, ~lid);
-    and (done, timer_done, cancel_n);
-
-    // Next state logic
+    // Combinational next state (dataflow style)
     always @(*) begin
         case (state)
-            IDLE:  next_state = start_ok ? READY : IDLE;
-            READY: next_state = (mode_ok && safe) ? SOAK : (cancel ? IDLE : READY);
-            SOAK:  next_state = done ? WASH : (cancel ? IDLE : SOAK);
-            WASH:  next_state = done ? RINSE : (cancel ? IDLE : WASH);
-            RINSE: next_state = done ? SPIN : (cancel ? IDLE : RINSE);
-            SPIN:  next_state = done ? IDLE : (cancel ? IDLE : SPIN);
+            IDLE:  next_state = (lid==0 && start && cancel==0) ? READY : IDLE;
+            READY: next_state = (lid==0 && cancel==0 && (mode1|mode2|mode3)) ? SOAK :
+                                (cancel ? IDLE : READY);
+            SOAK:  next_state = (timer_done && cancel==0) ? WASH :
+                                (cancel ? IDLE : SOAK);
+            WASH:  next_state = (timer_done && cancel==0) ? RINSE :
+                                (cancel ? IDLE : WASH);
+            RINSE: next_state = (timer_done && cancel==0) ? SPIN :
+                                (cancel ? IDLE : RINSE);
+            SPIN:  next_state = (timer_done && cancel==0) ? IDLE :
+                                (cancel ? IDLE : SPIN);
             default: next_state = IDLE;
         endcase
     end
 
-    // Sequential state update
+    // Sequential update
     always @(posedge clk or negedge rst_n)
         if (!rst_n)
             state <= IDLE;
         else
             state <= next_state;
 
-    // Phase selection
+    // Phase selection (dataflow)
     always @(*) begin
         case (state)
             SOAK:  phase_sel = 2'b00;
@@ -65,11 +62,11 @@ module washing_machine_gate(
         endcase
     end
 
-    // Outputs via gate-style logic
+    // Continuous assignments for enable signals
     assign soak_en  = (state == SOAK);
     assign wash_en  = (state == WASH);
     assign rinse_en = (state == RINSE);
     assign spin_en  = (state == SPIN);
-    or (timer_enable, soak_en, wash_en, rinse_en, spin_en);
+    assign timer_enable = soak_en | wash_en | rinse_en | spin_en;
 
 endmodule
